@@ -6,10 +6,10 @@ import java.util.HashSet;
 import java.util.Set;
 
 
-import net.gravitydevelopment.updater.Updater;
 import org.apache.commons.lang.Validate;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
@@ -24,18 +24,16 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.SignChangeEvent;
-import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.inventory.*;
-import org.bukkit.event.player.PlayerExpChangeEvent;
-import org.bukkit.event.player.PlayerLoginEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.Damageable;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public class SalvageSmelter extends JavaPlugin implements Listener {
 
-    private Updater updater;
     private BlockFace[] fourSides = new BlockFace[] { BlockFace.SOUTH, BlockFace.NORTH, BlockFace.WEST, BlockFace.EAST };
-    private EnumSet<Material> signMaterials = EnumSet.of(Material.WALL_SIGN, Material.SIGN_POST);
+    private EnumSet<Material> signMaterials = EnumSet.of(Material.WALL_SIGN, Material.SIGN);
     private HashMap<FurnaceBurnEvent, Integer> burnTimes = new HashMap<FurnaceBurnEvent, Integer>();
     private HashMap<Material, SmeltRecipe> recipeMap = new HashMap<Material, SmeltRecipe>();
     private boolean worldWhitelist = true; // blacklist if false
@@ -49,17 +47,6 @@ public class SalvageSmelter extends JavaPlugin implements Listener {
         saveDefaultConfig();
         loadConfig();
         getServer().getPluginManager().registerEvents(this, this);
-    }
-
-    public void doUpdater() {
-        String autoUpdate = getConfig().getString("auto-update", "notify-only").toLowerCase();
-        if (autoUpdate.equals("true")) {
-            updater = new Updater(this, 55725, this.getFile(), Updater.UpdateType.DEFAULT, true);
-        } else if (autoUpdate.equals("false")) {
-            getLogger().info("Auto-updater is disabled.  Skipping check.");
-        } else {
-            updater = new Updater(this, 55725, this.getFile(), Updater.UpdateType.NO_DOWNLOAD, true);
-        }
     }
 
     public ItemStack parseResultStack(String s) {
@@ -77,35 +64,20 @@ public class SalvageSmelter extends JavaPlugin implements Listener {
             getLogger().warning("Recipe Result Cannot exceed Max stack size, setting to " + mat.getMaxStackSize());
             qty = mat.getMaxStackSize();
         }
-        return new ItemStack(mat, qty, data);
+        // ItemSTack ctor with damage is deprecated
+        // return new ItemStack(mat, qty, data);
+        return createStack(mat, qty, data);
     }
-
-    @EventHandler(ignoreCancelled=true)
-    public void onPlayerLogin(PlayerLoginEvent event) {
-        if (updater == null) {
-            // Auto updater is disabled, no need to notify.
-            return;
+    
+    private ItemStack createStack(Material mat, int qty, short dmg)
+    {
+        ItemStack res = new ItemStack(mat, qty);
+        ItemMeta meta = res.getItemMeta();
+        if (meta != null) {
+            ((Damageable) meta).setDamage(dmg);
+            res.setItemMeta(meta);
         }
-        if (event.getPlayer().hasPermission("salvagesmelter.admin")) {
-            final String playerName = event.getPlayer().getName();
-            getServer().getScheduler().runTaskLaterAsynchronously(this, new Runnable() {
-                public void run() {
-                    Player player = getServer().getPlayer(playerName);
-                    if (player != null && player.isOnline()) {
-                        switch (updater.getResult()) {
-                        case UPDATE_AVAILABLE:
-                            player.sendMessage("A new version of SalvageSmelter is available at http://dev.bukkit.org/bukkit-mods/salvagesmelter/");
-                            break;
-                        case SUCCESS:
-                            player.sendMessage("A new version of SalvageSmelter has been downloaded and will take effect when the server restarts.");
-                            break;
-                        default:
-                            // nothing
-                        }
-                    }
-                }
-            }, 20);
-        }
+        return res;
     }
 
     public void loadConfig() {
@@ -133,12 +105,13 @@ public class SalvageSmelter extends JavaPlugin implements Listener {
             this.worldList.add(wn.toLowerCase());
         }
         ConfigurationSection cfg = getConfig().getConfigurationSection("recipes");
+        int recipeIdx = 0;
         for (String key: cfg.getKeys(true)) {
             Material mat = Material.valueOf(key);
             ItemStack result = parseResultStack(cfg.getString(key));
 			if (mat != null && result != null) {
-                SmeltRecipe sr = new SmeltRecipe(mat, result);
-
+                SmeltRecipe sr = new SmeltRecipe(new NamespacedKey(this, String.valueOf(recipeIdx)), mat, result);
+                recipeIdx++;
                 sr.installFurnaceRecipe(this);
                 recipeMap.put(sr.getSmeltable(), sr);
             }
@@ -159,7 +132,6 @@ public class SalvageSmelter extends JavaPlugin implements Listener {
                 }
             }
         }
-        doUpdater();
     }
 
     @Override
@@ -239,8 +211,10 @@ public class SalvageSmelter extends JavaPlugin implements Listener {
         if (!recipeMap.containsKey(orig.getType())) {
             return;
         }
+        ItemMeta meta = orig.getItemMeta();
+        short dmg =  (meta == null) ? 0 : (short) ((Damageable) meta).getDamage();
 
-        double percentage = (orig.getType().getMaxDurability() - orig.getDurability()) / (double) orig.getType().getMaxDurability();
+        double percentage = (orig.getType().getMaxDurability() - dmg) / (double) orig.getType().getMaxDurability();
         if (Double.isNaN(percentage)) {
             percentage = 1.0D;
         } else if (percentage < 0) {
@@ -249,7 +223,7 @@ public class SalvageSmelter extends JavaPlugin implements Listener {
         debug("SmeltEvent::Damage:" + percentage);
         ItemStack result = getSalvage(orig.getType(), event.getResult().getType(), percentage);
         if (result == null || result.getAmount() == 0) {
-            event.setResult(new ItemStack(Material.COAL, 1, (short)1));
+            event.setResult(createStack(Material.COAL, 1, (short)1));
         } else {
             event.setResult(result);
         }
@@ -390,7 +364,8 @@ public class SalvageSmelter extends JavaPlugin implements Listener {
     public ItemStack getSalvage(Material originalMaterial, Material rawMaterial , double damagePct) {
         debug("getSalvage(" + originalMaterial + ", " + rawMaterial + ", " + damagePct + ")");
         SmeltRecipe recipe = recipeMap.get(originalMaterial);
-        if (rawMaterial.equals(recipe.getResult().getType())) {
+        // if our recipe returns something different than the original recipe (i.e. iron armor ingots instead of nuggets), only coal is returned!
+        // if (true /* so do not check that they are equal! --  rawMaterial.equals(recipe.getResult().getType())*/) {
             int amt = recipe.getResult().getAmount();
             if (!alwaysYieldFullAmt) {
                 int max = amt;
@@ -399,13 +374,13 @@ public class SalvageSmelter extends JavaPlugin implements Listener {
             }
             ItemStack stack = recipe.getResult().clone();
             if (amt == 0) {
-                stack = new ItemStack(Material.COAL,1,(short)1);
+                stack = createStack(Material.COAL,1,(short)1);
             } else {
                 stack.setAmount(amt);
             }
             return stack;
-        }
-        return null;
+        /*}
+        return null;*/
     }
 
     public void debug(String s) {

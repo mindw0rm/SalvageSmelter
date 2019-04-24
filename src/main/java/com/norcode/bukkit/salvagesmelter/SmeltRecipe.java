@@ -1,7 +1,7 @@
 package com.norcode.bukkit.salvagesmelter;
 
 import org.bukkit.Material;
-import org.bukkit.entity.Player;
+import org.bukkit.NamespacedKey;
 import org.bukkit.inventory.FurnaceRecipe;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.Recipe;
@@ -13,10 +13,11 @@ public class SmeltRecipe {
     private FurnaceRecipe recipe;
     private String group;
     
-    public SmeltRecipe(Material smeltable, ItemStack result) {
+    public SmeltRecipe(NamespacedKey key, Material smeltable, ItemStack result) {
         this.smeltable = smeltable;
         this.result = result;
-        this.recipe = new FurnaceRecipe(this.result.clone(), smeltable, 32767);
+        // this.recipe = new FurnaceRecipe(this.result.clone(), smeltable, 32767);
+        this.recipe = new FurnaceRecipe(key, this.result.clone(), smeltable, 0, 200);
     }
 
     public ItemStack getResult() {
