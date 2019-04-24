@@ -1,5 +1,5 @@
-author: andrepl
-version: 1.something
+author: andrepl, mindw0rm
+version: 0.1.8
 name: SalvageSmelter
 main: com.norcode.bukkit.salvagesmelter.SalvageSmelter
 
